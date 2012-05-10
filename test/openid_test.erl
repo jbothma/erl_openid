@@ -3,7 +3,7 @@
 -include("openid.hrl").
 
 setup() ->
-    [ application:start(X) || X <- [ crypto, public_key, ssl, sasl, inets, ibrowse ] ].
+    [ application:start(X) || X <- [ crypto, public_key, ssl, sasl, inets ] ].
 
 discover2_test_() ->
     Cases = [{"https://www.google.com/accounts/o8/id",

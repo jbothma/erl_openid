@@ -7,11 +7,15 @@
 %%%-------------------------------------------------------------------
 -module(openid).
 
--export([discover/1, associate/1, authentication_url/3]).
+-export([discover/1, associate/1, authentication_url/3, start/0]).
 
 -include("openid.hrl").
+-define(APP, openid).
 
-
+start() ->
+    application:load(?APP),
+    {ok, Deps} = application:get_key(?APP, applications),
+    lists:foreach(fun application:start/1, Deps).
 
 %% ------------------------------------------------------------
 %% Discovery
@@ -75,15 +79,15 @@ authreq_by_claimed_id(XRDS, [{Type,Version}|Rest]) ->
 
 
 build_authReq(XRDS, Service, Version) ->
-    #openid_authreq{opURLs=Service#openid_xrdservice.uris, 
-		    version=Version,
-		    claimedID=XRDS#openid_xrds.claimedID,
-		    localID=Service#openid_xrdservice.localID}.
+    #openid_authreq{opURLs=Service#openid_xrdservice.uris,
+                    version=Version,
+                    claimedID=XRDS#openid_xrds.claimedID,
+                    localID=Service#openid_xrdservice.localID}.
 
 
 html_discovery(Id, Body) ->
     html_discovery(Id, Body, [{"openid2.provider", "openid2.local_id", {2,0}},
-			      {"openid.server", "openid.delegate", {1,1}}]).
+                              {"openid.server", "openid.delegate", {1,1}}]).
 
 html_discovery(_Id, _, []) ->
     none;
@@ -137,7 +141,7 @@ associate(OpURL) ->
     {Public, Private} = crypto:dh_generate_key([MP,MG]),
 
     %?DBG({pub_priv, Public, Private, size(Public), size(Private)}),
-    
+
     _RollPub = roll(Public),
     %?DBG({rolled, RollPub, size(RollPub)}),
 
@@ -157,7 +161,7 @@ associate(OpURL) ->
 
     Handle = ?GV("assoc_handle", Response),
     ExpiresIn = list_to_integer(?GV("expires_in", Response)),
-    
+
     ServPublic = unroll(base64:decode(?GV("dh_server_public", Response))),
 
     %?DBG({serv_pub, ServPublic}),
@@ -170,13 +174,13 @@ associate(OpURL) ->
 
     MAC = crypto:exor(crypto:sha(ZZ), EncMAC),
 
-    #openid_assoc{handle=Handle, 
-		  created=now(), 
-		  expiresIn=ExpiresIn, 
-		  servPublic=ServPublic,
-		  mac=MAC}.
+    #openid_assoc{handle=Handle,
+                  created=now(),
+                  expiresIn=ExpiresIn,
+                  servPublic=ServPublic,
+                  mac=MAC}.
 
- 
+
 roll(N) when is_binary(N) ->
     <<_Size:32, Bin/binary>> = N,
     btwoc(Bin).
@@ -195,9 +199,9 @@ unroll(Bin) when is_binary(Bin) ->
 %% ------------------------------------------------------------
 
 authentication_url(AuthReq, ReturnTo, Realm) ->
-    
+
     Assoc = AuthReq#openid_authreq.assoc,
-    
+
     IDBits = case AuthReq#openid_authreq.claimedID of
                  none -> [];
                  _ -> [{"openid.claimed_id", AuthReq#openid_authreq.claimedID},
@@ -209,7 +213,7 @@ authentication_url(AuthReq, ReturnTo, Realm) ->
               {"openid.assoc_handle", Assoc#openid_assoc.handle},
               {"openid.return_to", ReturnTo},
               {"openid.realm", Realm}] ++ IDBits,
-    
+
     QueryString = openid_pm:uri_encode(Params),
 
     [URL|_] = AuthReq#openid_authreq.opURLs,

@@ -2,17 +2,14 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("openid.hrl").
 
-setup() ->
-    [ application:start(X) || X <- [ crypto, public_key, ssl, sasl, inets, ibrowse ] ].
-
 prepare_test_() ->
-    {setup, fun setup/0,
+    {setup, fun openid:start/0,
      {timeout, 5000,
       ?_test(
-	 begin
-	     {ok, Server} = gen_server:start(openid_srv, start_link, [test_server]),
-	     Result = (catch gen_server:call(Server, {prepare, "foo", "http://exbrend.livejournal.com", true})),
-	     ?_assertEqual(ok, element(1, Result))
-	 end)
+         begin
+             {ok, Server} = gen_server:start(openid_srv, start_link, [test_server]),
+             Result = (catch gen_server:call(Server, {prepare, "foo", "http://exbrend.livejournal.com", true})),
+             ?_assertEqual(ok, element(1, Result))
+         end)
      }
     }.
