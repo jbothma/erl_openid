@@ -11,32 +11,34 @@
 -define(DBG(Term), io:format("~p: ~p~n", [self(), Term])).
 -define(XRI_GCTX_SYMBOLS, [$=, $@, $+, $$, $!, $(]).
 
+-type(url() :: string()).
+
 -record(openid_xrdservice, {
-  types,
-  uris,
-  localID
-}).
+          types :: [url()],
+          uris :: [url()],
+          localID :: none | string()
+         }).
 
 -record(openid_xrds, {
-  origID, 
-  claimedID, 
-  canonicalID, 
-  isXRI, 
-  services
-}).
-
--record(openid_authreq, {
-   opURLs,
-   version,
-   claimedID=none,
-   localID=none,
-   assoc=none
-}).
+          origID :: string(),
+          claimedID :: none | string(),
+          canonicalID :: string(),
+          isXRI :: boolean(),
+          services :: [#openid_xrdservice{}]
+         }).
 
 -record(openid_assoc, {
-  handle,
-  created,
-  expiresIn,
-  servPublic,
-  mac
-}).
+          opURL :: url(),
+          handle :: string(),
+          created :: erlang:timestamp(),
+          expiresIn :: integer(),
+          servPublic :: binary(),
+          mac :: binary()
+         }).
+
+-record(openid_authreq, {
+          opURLs :: [url()],
+          version :: {1,0} | {1, 1} | {2, 0},
+          claimedID=none :: none | string(),
+          localID=none :: none | string()
+         }).

@@ -7,8 +7,7 @@
 %%%-------------------------------------------------------------------
 -module(openid).
 
--export([discover/1, associate/1, authentication_url/3, authentication_url/4,
-         start/0]).
+-export([discover/1, associate/1, authentication_url/4, start/0, verify/3]).
 
 -include("openid.hrl").
 -define(APP, openid).
@@ -134,8 +133,9 @@ get_identity_params(ClaimedID, LocalID) ->
 
 -define(CONTENT_TYPE, "application/x-www-form-urlencoded; charset=UTF-8").
 
+associate(#openid_authreq{opURLs=[OpURL | _]}) ->
+    associate(OpURL);
 associate(OpURL) ->
-
     MP = crypto:mpint(?P),
     MG = crypto:mpint(?G),
 
@@ -175,7 +175,8 @@ associate(OpURL) ->
 
     MAC = crypto:exor(crypto:sha(ZZ), EncMAC),
 
-    #openid_assoc{handle=Handle,
+    #openid_assoc{opURL=OpURL,
+                  handle=Handle,
                   created=now(),
                   expiresIn=ExpiresIn,
                   servPublic=ServPublic,
@@ -199,20 +200,11 @@ unroll(Bin) when is_binary(Bin) ->
 %% Authentication
 %% ------------------------------------------------------------
 
-authentication_url(AuthReq=#openid_authreq{assoc=none,
-                                           opURLs=[URL | _]},
-                   ReturnTo,
-                   Realm) ->
-    authentication_url(AuthReq, ReturnTo, Realm, associate(URL));
-authentication_url(AuthReq=#openid_authreq{assoc=Assoc}, ReturnTo, Realm) ->
-    authentication_url(AuthReq, ReturnTo, Realm, Assoc).
-
 authentication_url(#openid_authreq{claimedID=ClaimedID,
-                                   localID=LocalID,
-                                   opURLs=[URL | _]},
+                                   localID=LocalID},
                    ReturnTo,
                    Realm,
-                   #openid_assoc{handle=Handle}) ->
+                   #openid_assoc{handle=Handle, opURL=URL}) ->
     IDBits = case ClaimedID of
                  none ->
                      [];
@@ -236,3 +228,75 @@ add_qs([C | Rest], QueryString) ->
     [C | add_qs(Rest, QueryString)];
 add_qs([], QueryString) ->
     [$? | QueryString].
+
+%% ------------------------------------------------------------
+%% Verification
+%% ------------------------------------------------------------
+
+verify(RawReturnTo, RawFields, Assoc) ->
+    %% TODO: verify that the claimed_id is what we want
+    try verify_norm(normalize_url(RawReturnTo),
+                    normalize_fields(RawFields),
+                    Assoc)
+    catch throw:Err ->
+            Err
+    end.
+
+normalize_url(URL) when is_binary(URL) ->
+    binary_to_list(URL);
+normalize_url(URL) ->
+    URL.
+
+normalize_fields([]) ->
+    [];
+normalize_fields([{K, V} | Rest]) when is_binary(K) andalso is_binary(V) ->
+    normalize_fields([{binary_to_list(K), binary_to_list(V)} | Rest]);
+normalize_fields([{"openid." ++ K, V} | Rest]) when is_list(V) ->
+    [{K, V} | normalize_fields(Rest)];
+normalize_fields([_KV | Rest]) ->
+    normalize_fields(Rest).
+
+verify_norm(ReturnTo,
+            Fields,
+            #openid_assoc{handle=Handle,
+                          mac=MAC}) ->
+    expect_field("return_to", ReturnTo, Fields),
+    expect_field("assoc_handle", Handle, Fields),
+    Signed = string:tokens(get_field("signed", Fields), ","),
+    Sig = get_field("sig", Fields),
+    eq("sig",
+       sign(MAC, Signed, Fields),
+       try base64:decode(Sig)
+       catch error:_ ->
+               {invalid_base64, Sig}
+       end),
+    eq("missing signature for required fields",
+       [],
+       ["assoc_handle", "claimed_id",
+        "response_nonce", "return_to"] -- Signed),
+    Fields.
+
+sign(MAC, Signed, Fields) ->
+    crypto:sha_mac(
+      MAC,
+      [[K, $:, get_field(K, Fields), $\n]
+       || K <- Signed]).
+
+get_field(K, Fields) ->
+    case lists:keyfind(K, 1, Fields) of
+        {_, V} ->
+            V;
+        false ->
+            throw({error, {missing_field, K}})
+    end.
+
+expect_field(K, Expect, Fields) ->
+    eq(K, Expect, get_field(K, Fields)).
+
+eq(_K, Expect, Value) when Value =:= Expect ->
+    Value;
+eq(K, Expect, Value) ->
+    throw({error, {badmatch,
+                   [{field, K},
+                    {expect, Expect},
+                    {value, Value}]}}).
