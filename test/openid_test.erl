@@ -23,11 +23,11 @@ discover2_test_() ->
 			  || {URL, Result} <- Cases ]}.
 
 discover1_test_() ->
-    Cases = [{"blog.paulbonser.com",
+    Cases = [{"etrepum.livejournal.com",
 	      #openid_authreq{opURLs = ["http://www.livejournal.com/openid/server.bml"],
-			      version = {1,1},
-			      claimedID = "http://blog.paulbonser.com/",
-			      localID = "http://misterpib.livejournal.com/",
+			      version = {2,0},
+			      claimedID = "http://etrepum.livejournal.com/data/yadis",
+			      localID = "http://etrepum.livejournal.com/",
 			      assoc = none}}
 	    ],
     {setup, fun setup/0, [?_assertEqual(Result, openid:discover(URL))
