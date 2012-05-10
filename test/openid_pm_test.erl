@@ -1,5 +1,4 @@
 -module(openid_pm_test).
--compile([export_all]).
 -include_lib("eunit/include/eunit.hrl").
 
 -define(PL, [{"mode", "error"}, {"error", "This is an example message"}]).

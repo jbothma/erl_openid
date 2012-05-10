@@ -1,5 +1,4 @@
 -module(openid_utils_test).
--compile([export_all]).
 -include_lib("eunit/include/eunit.hrl").
 
 normalization_test_() ->

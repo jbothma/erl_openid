@@ -1,10 +1,9 @@
 -module(yadis_test).
--compile([export_all]).
 -include_lib("eunit/include/eunit.hrl").
 -include("openid.hrl").
 
 setup() ->
-    [ application:start(X) || X <- [ crypto, ssl, sasl, inets, ibrowse ] ].
+    [ application:start(X) || X <- [ crypto, public_key, ssl, sasl, inets, ibrowse ] ].
 
 retrieve_test_() ->
     Cases = [{"https://www.google.com/accounts/o8/id",

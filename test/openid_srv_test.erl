@@ -1,10 +1,9 @@
 -module(openid_srv_test).
--compile([export_all]).
 -include_lib("eunit/include/eunit.hrl").
 -include("openid.hrl").
 
 setup() ->
-    [ application:start(X) || X <- [ crypto, ssl, sasl, inets, ibrowse ] ].
+    [ application:start(X) || X <- [ crypto, public_key, ssl, sasl, inets, ibrowse ] ].
 
 prepare_test_() ->
     {setup, fun setup/0,
