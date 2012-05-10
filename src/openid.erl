@@ -7,7 +7,8 @@
 %%%-------------------------------------------------------------------
 -module(openid).
 
--export([discover/1, associate/1, authentication_url/3, start/0]).
+-export([discover/1, associate/1, authentication_url/3, authentication_url/4,
+         start/0]).
 
 -include("openid.hrl").
 -define(APP, openid).
@@ -198,24 +199,40 @@ unroll(Bin) when is_binary(Bin) ->
 %% Authentication
 %% ------------------------------------------------------------
 
-authentication_url(AuthReq, ReturnTo, Realm) ->
+authentication_url(AuthReq=#openid_authreq{assoc=none,
+                                           opURLs=[URL | _]},
+                   ReturnTo,
+                   Realm) ->
+    authentication_url(AuthReq, ReturnTo, Realm, associate(URL));
+authentication_url(AuthReq=#openid_authreq{assoc=Assoc}, ReturnTo, Realm) ->
+    authentication_url(AuthReq, ReturnTo, Realm, Assoc).
 
-    Assoc = AuthReq#openid_authreq.assoc,
-
-    IDBits = case AuthReq#openid_authreq.claimedID of
-                 none -> [];
-                 _ -> [{"openid.claimed_id", AuthReq#openid_authreq.claimedID},
-                       {"openid.identity", AuthReq#openid_authreq.localID}]
+authentication_url(#openid_authreq{claimedID=ClaimedID,
+                                   localID=LocalID,
+                                   opURLs=[URL | _]},
+                   ReturnTo,
+                   Realm,
+                   #openid_assoc{handle=Handle}) ->
+    IDBits = case ClaimedID of
+                 none ->
+                     [];
+                 _ ->
+                     [{"openid.claimed_id", ClaimedID},
+                      {"openid.identity", LocalID}]
              end,
+    iolist_to_binary(
+      add_qs(
+        URL,
+        openid_pm:uri_encode(
+          [{"openid.ns", "http://specs.openid.net/auth/2.0"},
+           {"openid.mode", "checkid_setup"},
+           {"openid.assoc_handle", Handle},
+           {"openid.return_to", ReturnTo},
+           {"openid.realm", Realm} | IDBits]))).
 
-    Params = [{"openid.ns", "http://specs.openid.net/auth/2.0"},
-              {"openid.mode", "checkid_setup"},
-              {"openid.assoc_handle", Assoc#openid_assoc.handle},
-              {"openid.return_to", ReturnTo},
-              {"openid.realm", Realm}] ++ IDBits,
-
-    QueryString = openid_pm:uri_encode(Params),
-
-    [URL|_] = AuthReq#openid_authreq.opURLs,
-
-    list_to_binary([URL, "?", QueryString]).
+add_qs(Rest="?" ++ _, QueryString) ->
+    [Rest, [$& | QueryString]];
+add_qs([C | Rest], QueryString) ->
+    [C | add_qs(Rest, QueryString)];
+add_qs([], QueryString) ->
+    [$? | QueryString].
