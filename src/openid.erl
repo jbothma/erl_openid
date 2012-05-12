@@ -8,7 +8,7 @@
 -module(openid).
 
 -export([discover/1, associate/1, authentication_url/4, authentication_url/5,
-         start/0, verify/3, ax/1, verify_ax/2]).
+         start/0, verify/3, ax/1, verify_ax/2, assoc_handle/1]).
 
 -include("openid.hrl").
 -define(APP, openid).
@@ -23,7 +23,7 @@ start() ->
 %% ------------------------------------------------------------
 
 discover(Identifier) when is_atom(Identifier) ->
-    discover(provider(Identifier));
+    discover(binary_to_list(provider(Identifier)));
 discover(Identifier) ->
     Req = case yadis:retrieve(Identifier) of
               {none, NormalizedId, Body} ->
@@ -145,6 +145,9 @@ get_identity_params(ClaimedID, LocalID) ->
 -define(G, 2).
 
 -define(CONTENT_TYPE, "application/x-www-form-urlencoded; charset=UTF-8").
+
+assoc_handle(#openid_assoc{handle=Handle}) ->
+    iolist_to_binary(Handle).
 
 associate(#openid_authreq{opURLs=[OpURL | _]}) ->
     associate(OpURL);
