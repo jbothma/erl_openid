@@ -8,7 +8,7 @@
 -module(openid).
 
 -export([discover/1, associate/1, authentication_url/4, authentication_url/5,
-         start/0, verify/3, ax/1, verify_ax/2, assoc_handle/1]).
+         start/0, verify/3, ax/1, verify_ax/2, assoc_handle/1, pape/1]).
 
 -include("openid.hrl").
 -define(APP, openid).
@@ -245,6 +245,16 @@ openid_norm({K, V}) when is_binary(K) andalso is_binary(V) ->
 openid_norm({K, V}) ->
     {"openid." ++ K, V}.
 
+pape(L) ->
+    [{<<"ns.pape">>, ns(pape)} | lists:flatmap(fun pape_field/1, L)].
+
+pape_field({max_auth_age, Seconds}) ->
+    [{<<"pape.max_auth_age">>, list_to_binary(integer_to_list(Seconds))}];
+pape_field({preferred_auth_policies, Policies}) ->
+    field_list(<<"pape.preferred_auth_policies">>, Policies, $\s);
+pape_field({preferred_auth_level_types, Types}) ->
+    field_list(<<"pape.preferred_auth_level_types">>, Types, $\s).
+
 ax(Attributes) ->
     %% Order shouldn't matter but might as well present the results
     %% in the same order as the input.
@@ -254,8 +264,8 @@ ax(Attributes) ->
     lists:append(
       [[{<<"ns.ax">>, ns(ax)},
         {<<"ax.mode">>, <<"fetch_request">>}],
-       field_list(<<"ax.required">>, Required),
-       field_list(<<"ax.if_available">>, IfAvailable),
+       field_list(<<"ax.required">>, Required, $,),
+       field_list(<<"ax.if_available">>, IfAvailable, $,),
        Fields]).
 
 %% https://developers.google.com/accounts/docs/OpenID#Parameters
@@ -289,12 +299,12 @@ ax_field({Name, if_available}, {Output, Required, IfAvailable}) ->
 ax_field(Name, {Output, Required, IfAvailable}) when is_atom(Name) ->
     {ax_output(Name, Output), [Name | Required], IfAvailable}.
 
-field_list(Name, [First | Rest]) ->
+field_list(Name, [First | Rest], Sep) ->
     [{Name,
       iolist_to_binary([atom_to_binary(First, utf8)
-                        | [[$,, atom_to_binary(Elem, utf8)]
+                        | [[Sep, atom_to_binary(Elem, utf8)]
                            || Elem <- Rest]])}];
-field_list(_Name, []) ->
+field_list(_Name, [], _Sep) ->
     [].
 
 add_qs(Rest="?" ++ _, QueryString) ->
