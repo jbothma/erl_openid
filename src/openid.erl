@@ -22,25 +22,33 @@ start() ->
 %% Discovery
 %% ------------------------------------------------------------
 
+discover(Identifier) when is_atom(Identifier) ->
+    discover(provider(Identifier));
 discover(Identifier) ->
     Req = case yadis:retrieve(Identifier) of
-              {none, NormalizedId, Body} -> html_discovery(NormalizedId, Body);
-              #openid_xrds{}=XRDS -> extract_authreq(XRDS);
+              {none, NormalizedId, Body} ->
+                  html_discovery(NormalizedId, Body);
+              #openid_xrds{}=XRDS ->
+                  extract_authreq(XRDS);
               {error, _Error} ->
                   %?DBG({error, Error}),
                   none
           end,
 
     case Req of
-        #openid_authreq{} -> set_identity_params(Req);
-        _ -> Req
+        #openid_authreq{} ->
+            set_identity_params(Req);
+        _ ->
+            Req
     end.
 
 
 extract_authreq(XRDS) ->
     case authreq_by_opid(XRDS) of
-        none -> authreq_by_claimed_id(XRDS);
-        Req -> Req
+        none ->
+            authreq_by_claimed_id(XRDS);
+        Req ->
+            Req
     end.
 
 authreq_by_opid(XRDS) ->
@@ -56,19 +64,22 @@ authreq_by_opid(XRDS, [Type|Rest]) ->
     end.
 
 
-find_service([], _) -> none;
-find_service([#openid_xrdservice{uris=[]}|Rest], Type) -> find_service(Rest, Type);
+find_service([], _) ->
+    none;
+find_service([#openid_xrdservice{uris=[]}|Rest], Type) ->
+    find_service(Rest, Type);
 find_service([#openid_xrdservice{types=Types}=Service|Rest], Type) ->
-    case lists:any(fun(X) -> X == Type end, Types) of
+    case lists:any(fun(X) -> X =:= Type end, Types) of
         true -> Service;
         false -> find_service(Rest, Type)
     end.
 
 
 authreq_by_claimed_id(XRDS) ->
-    authreq_by_claimed_id(XRDS, [{"http://specs.openid.net/auth/2.0/signon", {2,0}},
-                                 {"http://openid.net/signon/1.1", {1,1}},
-                                 {"http://openid.net/signon/1.0", {1,0}}]).
+    authreq_by_claimed_id(XRDS,
+                          [{"http://specs.openid.net/auth/2.0/signon", {2,0}},
+                           {"http://openid.net/signon/1.1", {1,1}},
+                           {"http://openid.net/signon/1.0", {1,0}}]).
 
 authreq_by_claimed_id(_, []) ->
     none;
@@ -99,7 +110,8 @@ html_discovery(Id, Body, [{ProviderRel, LocalIDRel, Version}|Rest]) ->
                 none -> html_discovery(Body, Rest);
                 URL ->
                     LocalID = html_local_id(Body, LocalIDRel),
-                    #openid_authreq{opURLs=[URL], version=Version, localID=LocalID, claimedID=Id}
+                    #openid_authreq{opURLs=[URL], version=Version,
+                                    localID=LocalID, claimedID=Id}
             end;
         _ -> html_discovery(Id, Body, Rest)
     end.
@@ -129,7 +141,7 @@ get_identity_params(ClaimedID, LocalID) ->
 %% ------------------------------------------------------------
 
 % Defaults from spec
--define(P, 1500073708273015748628013388693328252000303842391466352869527958572384115195772928792417592549921617769856041063651334172856114323013748155551037713908795501949688353681514443698908035718685336822727455568028009921661496375944512427).
+-define(P, 16#DCF93A0B883972EC0E19989AC5A2CE310E1D37717E8D9571BB7623731866E61EF75A2E27898B057F9891C2E27A639C3F29B60814581CD3B2CA3986D2683705577D45C2E7E52DC81C7A171876E5CEA74B1448BFDFAF18828EFD2519F14E45E3826634AF1949E5B535CC829A483B8A76223E5D490A257F05BDFF16F2FB22C583AB).
 -define(G, 2).
 
 -define(CONTENT_TYPE, "application/x-www-form-urlencoded; charset=UTF-8").
@@ -142,11 +154,6 @@ associate(OpURL) ->
 
     {Public, Private} = crypto:dh_generate_key([MP,MG]),
 
-    %?DBG({pub_priv, Public, Private, size(Public), size(Private)}),
-
-    _RollPub = roll(Public),
-    %?DBG({rolled, RollPub, size(RollPub)}),
-
     Params = [{"openid.ns", "http://specs.openid.net/auth/2.0"},
               {"openid.mode", "associate"},
               {"openid.assoc_type", "HMAC-SHA1"},
@@ -157,7 +164,8 @@ associate(OpURL) ->
 
     ReqBody = openid_pm:url_encode(Params),
 
-    {ok, 200, _Headers, Body} = openid_http:post(OpURL, ?CONTENT_TYPE, ReqBody),
+    {ok, 200, _Headers, Body} = openid_http:post(OpURL, ?CONTENT_TYPE,
+                                                 ReqBody),
 
     Response = openid_pm:kvf_decode(Body),
 
@@ -184,17 +192,18 @@ associate(OpURL) ->
                   mac=MAC}.
 
 
-roll(N) when is_binary(N) ->
-    <<_Size:32, Bin/binary>> = N,
+roll(<<_Size:32, Bin/binary>>) ->
     btwoc(Bin).
 
-btwoc(<<X, _/binary>>=Bin) when X < 128 -> Bin;
-btwoc(Bin) -> list_to_binary([<<0>>, Bin]).
+%% big endian two's complement
+btwoc(<<1:1, _/binary>>=Bin) ->
+    <<0, Bin/binary>>;
+btwoc(Bin) ->
+    Bin.
 
 
-unroll(Bin) when is_binary(Bin) ->
-    Size = size(Bin),
-    <<Size:32, Bin/binary>>.
+unroll(Bin) ->
+    <<(byte_size(Bin)):32, Bin/binary>>.
 
 
 %% ------------------------------------------------------------
@@ -240,19 +249,34 @@ ax(Attributes) ->
                                                   {[], [], []},
                                                   Attributes),
     lists:append(
-      [[{<<"ns.ax">>, schema(ax)},
+      [[{<<"ns.ax">>, ns(ax)},
         {<<"ax.mode">>, <<"fetch_request">>}],
        field_list(<<"ax.required">>, Required),
        field_list(<<"ax.if_available">>, IfAvailable),
        Fields]).
 
-schema(ax) ->
+%% https://developers.google.com/accounts/docs/OpenID#Parameters
+ns(ax) ->
     <<"http://openid.net/srv/ax/1.0">>;
-schema(email) ->
-    <<"http://axschema.org/contact/email">>.
+ns(pape) ->
+    <<"http://specs.openid.net/extensions/pape/1.0">>.
+
+provider(google) ->
+    <<"https://www.google.com/accounts/o8/id">>.
+
+ax_schema(country) ->
+    <<"http://axschema.org/contact/country/home">>;
+ax_schema(email) ->
+    <<"http://axschema.org/contact/email">>;
+ax_schema(firstname) ->
+    "http://axschema.org/namePerson/first";
+ax_schema(language) ->
+    "http://axschema.org/pref/language";
+ax_schema(lastname) ->
+    "http://axschema.org/namePerson/last".
 
 ax_output(Name, Output) ->
-    [{<<"ax.type.", (atom_to_binary(Name, utf8))/binary>>, schema(Name)}
+    [{<<"ax.type.", (atom_to_binary(Name, utf8))/binary>>, ax_schema(Name)}
      | Output].
 
 ax_field({Name, required}, {Output, Required, IfAvailable}) ->
@@ -281,11 +305,11 @@ add_qs([], QueryString) ->
 %% Verification
 %% ------------------------------------------------------------
 
-verify(RawReturnTo, RawFields, Assoc) ->
+verify(RawReturnTo, #openid_assoc{handle=Handle, mac=MAC}, RawFields) ->
     %% TODO: verify that the claimed_id is what we want
     try verify_norm(normalize_url(RawReturnTo),
-                    normalize_fields(RawFields),
-                    Assoc)
+                    {iolist_to_binary(Handle), MAC},
+                    normalize_fields(RawFields))
     catch throw:Err ->
             Err
     end.
@@ -307,12 +331,9 @@ normalize_fields([_KV | Rest]) ->
 split_comma(B) ->
     binary:split(B, <<",">>, [global]).
 
-verify_norm(ReturnTo,
-            Fields,
-            #openid_assoc{handle=Handle,
-                          mac=MAC}) ->
+verify_norm(ReturnTo, {Handle, MAC}, Fields) ->
     expect_field(<<"return_to">>, ReturnTo, Fields),
-    expect_field(<<"assoc_handle">>, iolist_to_binary(Handle), Fields),
+    expect_field(<<"assoc_handle">>, Handle, Fields),
     Signed = split_comma(get_field(<<"signed">>, Fields)),
     Sig = get_field(<<"sig">>, Fields),
     eq("sig",
@@ -331,7 +352,7 @@ verify_ax(Attributes, Fields) ->
     {_Out, Required, IfAvailable} = lists:foldr(fun ax_field/2,
                                                 {[], [], []},
                                                 Attributes),
-    {NSName=(<<"ns.", NS/binary>>), _} = lists:keyfind(schema(ax), 2, Fields),
+    {NSName=(<<"ns.", NS/binary>>), _} = lists:keyfind(ns(ax), 2, Fields),
     Prefix = <<NS/binary, ".">>,
     PLen = byte_size(Prefix),
     Signed = split_comma(get_field(<<"signed">>, Fields)),
@@ -353,7 +374,9 @@ fetch_ax([Name | Rest], AXFields, Required) ->
     case lists:keyfind(<<"value.", NameB/binary>>, 1, AXFields) of
         {_, Value} ->
             %% Ensure that the schema is what we asked for
-            expect_field(<<"type.", NameB/binary>>, schema(Name), AXFields),
+            expect_field(<<"type.", NameB/binary>>,
+                         ax_schema(Name),
+                         AXFields),
             [{Name, Value} | fetch_ax(Rest, AXFields, Required)];
         false when Required =:= false ->
             fetch_ax(Rest, AXFields, Required);
