@@ -7,7 +7,8 @@
 %%%-------------------------------------------------------------------
 -module(openid).
 
--export([discover/1, associate/1, authentication_url/4, start/0, verify/3]).
+-export([discover/1, associate/1, authentication_url/4, authentication_url/5,
+         start/0, verify/3, ax/1, verify_ax/2]).
 
 -include("openid.hrl").
 -define(APP, openid).
@@ -200,17 +201,22 @@ unroll(Bin) when is_binary(Bin) ->
 %% Authentication
 %% ------------------------------------------------------------
 
+authentication_url(AuthReq, ReturnTo, Realm, Assoc) ->
+    authentication_url(AuthReq, ReturnTo, Realm, Assoc, []).
+
 authentication_url(#openid_authreq{claimedID=ClaimedID,
                                    localID=LocalID},
                    ReturnTo,
                    Realm,
-                   #openid_assoc{handle=Handle, opURL=URL}) ->
+                   #openid_assoc{handle=Handle, opURL=URL},
+                   ExtraProps) ->
+    Extra = lists:map(fun openid_norm/1, ExtraProps),
     IDBits = case ClaimedID of
                  none ->
-                     [];
+                     Extra;
                  _ ->
                      [{"openid.claimed_id", ClaimedID},
-                      {"openid.identity", LocalID}]
+                      {"openid.identity", LocalID} | Extra]
              end,
     iolist_to_binary(
       add_qs(
@@ -221,6 +227,48 @@ authentication_url(#openid_authreq{claimedID=ClaimedID,
            {"openid.assoc_handle", Handle},
            {"openid.return_to", ReturnTo},
            {"openid.realm", Realm} | IDBits]))).
+
+openid_norm({K, V}) when is_binary(K) andalso is_binary(V) ->
+    openid_norm({binary_to_list(K), binary_to_list(V)});
+openid_norm({K, V}) ->
+    {"openid." ++ K, V}.
+
+ax(Attributes) ->
+    %% Order shouldn't matter but might as well present the results
+    %% in the same order as the input.
+    {Fields, Required, IfAvailable} = lists:foldr(fun ax_field/2,
+                                                  {[], [], []},
+                                                  Attributes),
+    lists:append(
+      [[{<<"ns.ax">>, schema(ax)},
+        {<<"ax.mode">>, <<"fetch_request">>}],
+       field_list(<<"ax.required">>, Required),
+       field_list(<<"ax.if_available">>, IfAvailable),
+       Fields]).
+
+schema(ax) ->
+    <<"http://openid.net/srv/ax/1.0">>;
+schema(email) ->
+    <<"http://axschema.org/contact/email">>.
+
+ax_output(Name, Output) ->
+    [{<<"ax.type.", (atom_to_binary(Name, utf8))/binary>>, schema(Name)}
+     | Output].
+
+ax_field({Name, required}, {Output, Required, IfAvailable}) ->
+    {ax_output(Name, Output), [Name | Required], IfAvailable};
+ax_field({Name, if_available}, {Output, Required, IfAvailable}) ->
+    {ax_output(Name, Output), Required, [Name | IfAvailable]};
+ax_field(Name, {Output, Required, IfAvailable}) when is_atom(Name) ->
+    {ax_output(Name, Output), [Name | Required], IfAvailable}.
+
+field_list(Name, [First | Rest]) ->
+    [{Name,
+      iolist_to_binary([atom_to_binary(First, utf8)
+                        | [[$,, atom_to_binary(Elem, utf8)]
+                           || Elem <- Rest]])}];
+field_list(_Name, []) ->
+    [].
 
 add_qs(Rest="?" ++ _, QueryString) ->
     [Rest, [$& | QueryString]];
@@ -242,28 +290,31 @@ verify(RawReturnTo, RawFields, Assoc) ->
             Err
     end.
 
-normalize_url(URL) when is_binary(URL) ->
-    binary_to_list(URL);
+normalize_url(URL) when is_list(URL) ->
+    list_to_binary(URL);
 normalize_url(URL) ->
     URL.
 
 normalize_fields([]) ->
     [];
-normalize_fields([{K, V} | Rest]) when is_binary(K) andalso is_binary(V) ->
-    normalize_fields([{binary_to_list(K), binary_to_list(V)} | Rest]);
-normalize_fields([{"openid." ++ K, V} | Rest]) when is_list(V) ->
+normalize_fields([{K, V} | Rest]) when is_list(K) andalso is_list(V) ->
+    normalize_fields([{list_to_binary(K), list_to_binary(V)} | Rest]);
+normalize_fields([{<<"openid.", K/binary>>, V} | Rest]) when is_binary(V) ->
     [{K, V} | normalize_fields(Rest)];
 normalize_fields([_KV | Rest]) ->
     normalize_fields(Rest).
+
+split_comma(B) ->
+    binary:split(B, <<",">>, [global]).
 
 verify_norm(ReturnTo,
             Fields,
             #openid_assoc{handle=Handle,
                           mac=MAC}) ->
-    expect_field("return_to", ReturnTo, Fields),
-    expect_field("assoc_handle", Handle, Fields),
-    Signed = string:tokens(get_field("signed", Fields), ","),
-    Sig = get_field("sig", Fields),
+    expect_field(<<"return_to">>, ReturnTo, Fields),
+    expect_field(<<"assoc_handle">>, iolist_to_binary(Handle), Fields),
+    Signed = split_comma(get_field(<<"signed">>, Fields)),
+    Sig = get_field(<<"sig">>, Fields),
     eq("sig",
        sign(MAC, Signed, Fields),
        try base64:decode(Sig)
@@ -272,9 +323,45 @@ verify_norm(ReturnTo,
        end),
     eq("missing signature for required fields",
        [],
-       ["assoc_handle", "claimed_id",
-        "response_nonce", "return_to"] -- Signed),
+       [<<"assoc_handle">>, <<"claimed_id">>,
+        <<"response_nonce">>, <<"return_to">>] -- Signed),
     Fields.
+
+verify_ax(Attributes, Fields) ->
+    {_Out, Required, IfAvailable} = lists:foldr(fun ax_field/2,
+                                                {[], [], []},
+                                                Attributes),
+    {NSName=(<<"ns.", NS/binary>>), _} = lists:keyfind(schema(ax), 2, Fields),
+    Prefix = <<NS/binary, ".">>,
+    PLen = byte_size(Prefix),
+    Signed = split_comma(get_field(<<"signed">>, Fields)),
+    %% Verify that all AX fields are signed
+    eq("missing signature for ax",
+       [],
+       [NSName |
+        [K || {K=(<<P:PLen/binary, _/binary>>), _V} <- Fields,
+              P =:= Prefix]] -- Signed),
+    AXFields = [{K, V} || {<<P:PLen/binary, K/binary>>, V} <- Fields,
+                          P =:= Prefix],
+    expect_field(<<"mode">>, <<"fetch_response">>, AXFields),
+    lists:append(
+      [fetch_ax(Required, AXFields, true),
+       fetch_ax(IfAvailable, AXFields, false)]).
+
+fetch_ax([Name | Rest], AXFields, Required) ->
+    NameB = atom_to_binary(Name, utf8),
+    case lists:keyfind(<<"value.", NameB/binary>>, 1, AXFields) of
+        {_, Value} ->
+            %% Ensure that the schema is what we asked for
+            expect_field(<<"type.", NameB/binary>>, schema(Name), AXFields),
+            [{Name, Value} | fetch_ax(Rest, AXFields, Required)];
+        false when Required =:= false ->
+            fetch_ax(Rest, AXFields, Required);
+        false ->
+            throw({error, {missing_ax_value, Name}})
+    end;
+fetch_ax([], _AXFields, _Required) ->
+    [].
 
 sign(MAC, Signed, Fields) ->
     crypto:sha_mac(
