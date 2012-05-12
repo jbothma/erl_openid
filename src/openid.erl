@@ -272,11 +272,11 @@ ax_schema(country) ->
 ax_schema(email) ->
     <<"http://axschema.org/contact/email">>;
 ax_schema(firstname) ->
-    "http://axschema.org/namePerson/first";
+    <<"http://axschema.org/namePerson/first">>;
 ax_schema(language) ->
-    "http://axschema.org/pref/language";
+    <<"http://axschema.org/pref/language">>;
 ax_schema(lastname) ->
-    "http://axschema.org/namePerson/last".
+    <<"http://axschema.org/namePerson/last">>.
 
 ax_output(Name, Output) ->
     [{<<"ax.type.", (atom_to_binary(Name, utf8))/binary>>, ax_schema(Name)}
